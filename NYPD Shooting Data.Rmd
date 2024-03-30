@@ -1,0 +1,161 @@
+---
+title: "NYPD Shooting Data"
+output: pdf_document
+date: "2024-03-24"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+```
+
+## Load the Data
+
+Let's first load the data from <https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD>.  Per the City of New York website, this dataset contains details, such as the location and time of occurrence, for every shooting incident that occurred in New York City from 2006 through the end of the prior calendar year.  The City of New York website indicates that this data is made available for public use.  Additional information about the dataset can be found on <https://catalog.data.gov/dataset/nypd-shooting-incident-data-historic>.
+
+```{r loadData, echo=TRUE}
+rawData = read_csv("https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD",
+                   show_col_types = FALSE)
+head(rawData)
+```
+
+## Clean and Transform the Data
+
+We cleaned the data by making the following changes:
+
+1. Changed the `OCCUR_DATE` column from character to date
+2. Coded `BORO` as a factor
+3. Added columns of factors for the month, year, and hour of the incident
+
+```{r cleanData, echo=TRUE}
+
+rawData = rawData %>%
+    mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>%
+    mutate(BORO = as.factor(as.character(BORO)))
+  
+rawData$MONTH = as.factor(month(rawData$OCCUR_DATE))
+rawData$YEAR = as.factor(year(rawData$OCCUR_DATE))
+rawData$HOUR = as.factor(hour(hms(as.character(rawData$OCCUR_TIME))))
+
+levels(rawData$HOUR) = c("12a", "1a", "2a", "3a", "4a", "5a", "6a", "7a", "8a", "9a", 
+                         "10a", "11a", "12p", "1p", "2p", "3p", "4p", "5p", "6p", "7p", 
+                         "8p", "9p", "10p", "11p")
+
+summary(rawData$MONTH)
+summary(rawData$YEAR)
+summary(rawData$HOUR)
+  
+```
+
+## Subset the Data
+We don't need all of the columns from the original dataset, so  let's create a new, smaller dataframe to summarize incident counts by month and borough.
+
+```{r enrich-monthly, echo=TRUE}
+monthlyIncidents <- rawData %>% group_by(MONTH, BORO) %>% 
+  summarize(Incidents = n())
+head(monthlyIncidents)
+```
+
+Let's create a similar dataframe to summarize incident counts by year and borough.
+```{r enrich-yearly, echo=TRUE}
+yearlyIncidents <- rawData %>% group_by(YEAR, BORO) %>% 
+  summarize(Incidents = n())
+head(yearlyIncidents)
+```
+
+Let's create a similar dataframe to summarize incident counts by hour and borough.
+```{r enrich-hourly, echo=TRUE}
+hourlyIncidents <- rawData %>% group_by(HOUR, BORO) %>% 
+  summarize(Incidents = n())
+head(hourlyIncidents)
+```
+
+## Visualize the Data - By Month and Borough
+It would be interesting to understand if incident counts differ over time using time segments of months, years, and hours. Let's start with months and plot the relationship between incident counts and month for each borough.  The plot shows that incident counts in Brooklyn are higher than the other boroughs and Staten Island has the fewest number of incidents.  The incident counts could be misleading regarding the relative safety of each borough if the boroughs with higher populations have higher incident counts.  It would be interesting to understand the incident count as a percentage of borough population. The population for each borough is not included in this data set, but another analysis could find this information from another data source and join the population into the data set.  For now, understanding the relationship between population and incident count is out of scope for this analysis.
+
+There appears to be higher incident counts across the boroughs in the summer months (i.e., June - August).  Note that this plot shows correlation, not causation.
+
+```{r visuaize-month, echo=TRUE}
+
+ggplot(monthlyIncidents, aes(x=MONTH, y=Incidents)) +
+  geom_point(aes(color = BORO)) +
+  geom_line(aes(group = BORO, color=BORO)) +
+  xlab("Month") + 
+  ylab("Incident Count") +
+  ggtitle("Incidents by Month and Borough") +
+  theme_bw() 
+
+```
+
+## Visualize the Data - By Year and Borough
+Let's plot the relationship between incident counts and year for each borough.  The number of incidents for all boroughs declined until 2019.  Then, all of the boroughs except Staten Island experienced a sharp increase in incidents in 2020.
+
+```{r visualize-year, echo=TRUE}
+
+ggplot(yearlyIncidents, aes(x=YEAR, y=Incidents)) +
+  geom_point(aes(color = BORO)) +
+  geom_line(aes(group = BORO, color=BORO)) +
+  xlab("YEAR") + 
+  ylab("Incident Count") +
+  ggtitle("Incidents by Year and Borough") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90))  
+
+```
+
+## Visualize the Data - By Hour and Borough
+Let's plot the relationship between incident counts and hour for each borough.  The number of incidents is higher during the late evening and early morning hours.  The incident count in Brooklyn shows the greatest difference between mid-day and late-night hours, but the Staten Island counts remain relatively flat. 
+
+```{r visualize-hour, echo=TRUE}
+
+ggplot(hourlyIncidents, aes(x=HOUR, y=Incidents)) +
+  geom_point(aes(color = BORO)) +
+  geom_line(aes(group = BORO, color=BORO)) +
+  xlab("Hour") + 
+  ylab("Incident Count") +
+  ggtitle("Incidents by Hour and Borough") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle=90)) 
+
+```
+
+## Model the Data
+Let's create a linear regression model predicting `Incidents` using `MONTH and BORO`.  We can see from the summary that the predictors for `BORO` are statistically significant based on the low p-values.  However, some of the month values are not statistically significant.  The model also confirms that we see lower predicted values of incidents for the Bronx, Manhattan, Queens, and Staten Island boroughs when compared to Brooklyn.  The model also confirms what we saw in the plot with June-August having the highest incidents per month.  The high R-squared means that the linear regression model explains roughly 90% of the variability we see in the incident data.
+
+```{r model, echo=TRUE}
+lm.mod = lm(Incidents ~ MONTH + BORO, data=monthlyIncidents)
+lm.pred = predict(lm.mod)
+monthlyIncidents$PRED = lm.pred
+
+summary(lm.mod)
+```
+
+
+The plot shows that the linear model, shown with dashed lines, follows the pattern of the actual incident data, shown in solid lines.  In other words, the linear prediction model captures that incidents were higher in the summer months and correctly predicted Brooklyn having the highest incident count followed by the Bronx, Queens, Manhattan, and Staten Island.  However, the prediction lines show sizeable prediction errors for Brooklyn and Staten Island.  The linear prediction model seems well-fitting for the incident counts in the Bronx, Manhattan, and Queens.
+
+```{r model-plot, echo=TRUE}
+ggplot(monthlyIncidents, aes(x=MONTH, y=Incidents, group = BORO, color=BORO)) +
+  geom_point() +
+  geom_line() +
+  geom_point(aes(y=PRED, color = BORO), shape=15)+
+  geom_line(aes(y=PRED), lty=2) +
+  xlab("Month") + 
+  ylab("Incidents") +
+  ggtitle("Predicted vs Actual Incidents by Month and Borough") +
+  scale_color_manual(values=c("purple","red", "darkgoldenrod", "blue", "black")) + 
+  theme_bw() 
+```
+
+## Commentary
+
+The data shows that incident counts differ across time.  We saw that incident counts were highest in the summer months and during the over night hours.  We also saw that incident counts had a downward trend across all boroughs until 2020, when there was a sharp increase in incidents.  
+
+As mentioned above, the plots could be misleading because the incident count is much higher in Brooklyn compared to the other boroughs.  This could mean that Brooklyn is more dangerous.  It could also mean that all boroughs have a similar ratio of incidents to population, but the incident count is higher in Brooklyn because the population is higher.  Without data on the population within each borough, we cannot speak to the safety of the boroughs.
+
+As with any manually entered data, there could be human error in the data that skews the results.  Additionally, there could be bias in the way the data was collected (e.g., some specific subset of the data were not reported).
+
+## Session Info
+```{r session, echo=FALSE}
+sessionInfo()
+```
