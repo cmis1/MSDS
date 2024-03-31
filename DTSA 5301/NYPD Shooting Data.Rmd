@@ -8,7 +8,16 @@ date: "2024-03-24"
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(lubridate)
+library(forecast)
 ```
+
+## Additional Libraries Used
+
+Note that this analysis leverages the forecast library, so users must execute the command `install.packages("forecast")` prior to knitting this document.
+
+## Intro
+
+In this analysis, we would like to investigate the frequency of shooting incidents in New York City.
 
 ## Load the Data
 
@@ -129,6 +138,7 @@ lm.pred = predict(lm.mod)
 monthlyIncidents$PRED = lm.pred
 
 summary(lm.mod)
+
 ```
 
 
@@ -145,6 +155,21 @@ ggplot(monthlyIncidents, aes(x=MONTH, y=Incidents, group = BORO, color=BORO)) +
   ggtitle("Predicted vs Actual Incidents by Month and Borough") +
   scale_color_manual(values=c("purple","red", "darkgoldenrod", "blue", "black")) + 
   theme_bw() 
+```
+
+
+## Forecast the Data
+
+Let's use the historical data for forecast shootings for the next three years.  We can see that the forecasted number of incidents is similar to the last three years of historical data.  We can also see that the level of uncertainty grows the further out into the future we forecast.
+
+```{r forecast, echo=TRUE}
+
+monthly.fc <- rawData %>% group_by(YEAR, MONTH) %>% 
+  summarize(Incidents = n())
+
+fc = forecast(ts(monthly.fc$Incidents, start=c(2002), end=c(2022), frequency=12), h=36)
+plot(fc)
+
 ```
 
 ## Commentary
